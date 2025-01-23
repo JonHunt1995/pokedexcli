@@ -20,22 +20,62 @@ func cleanInput(text string) []string {
 	return sanitizedWords
 }
 
-func commandExit(cfg *Config) error {
+func commandExit(cfg *Config, s string) error {
 	fmt.Println("Closing the Pokedex... Goodbye!")
 	os.Exit(0)
 	return nil
 }
 
-func commandHelp(cfg *Config) error {
+func commandHelp(cfg *Config, s string) error {
 	fmt.Println("Welcome to the Pokedex!")
 	fmt.Println("Usage:")
 	fmt.Println("help: Displays a help message")
 	fmt.Println("exit: Exit the Pokedex")
 	fmt.Println("map: Display a list of location areas")
+	fmt.Println("explore: Displays all pokemon in location area")
 	return nil
 }
 
-func commandMap(cfg *Config) error {
+func commandExplore(cfg *Config, location string) error {
+	fmt.Printf("Exploring %v...\n", location)
+	lar := locationAreaResponse{}
+	// Check if location is empty
+	if location == "" {
+		return fmt.Errorf(("no location area provided"))
+	}
+	// Check if a location is in cache
+	if cachedData, ok := cfg.cache[location]; ok {
+		lar = cachedData
+	} else {
+		// Get a HTTP GET Response from API
+		url := "https://pokeapi.co/api/v2/location-area/" + location
+		res, err := http.Get(url)
+		if err != nil {
+			return err
+		}
+		// Check to see if Status Code is OK or not
+		if res.StatusCode != 200 {
+			return fmt.Errorf("location area '%s' not found", location)
+		}
+		defer res.Body.Close()
+		// Decode JSON to a Go Struct responseJSON type
+
+		decoder := json.NewDecoder(res.Body)
+		if err := decoder.Decode(&lar); err != nil {
+			return err
+		}
+		cfg.cache[location] = lar
+	}
+
+	fmt.Println("Found Pokemon:")
+	// Loop through all encountered pokemon
+	for _, pokemonEncounter := range lar.PokemonEncounters {
+		fmt.Printf(" - %v\n", pokemonEncounter.Pokemon.Name)
+	}
+	return nil
+}
+
+func commandMap(cfg *Config, s string) error {
 	// Get a HTTP GET Response from API
 	url := "https://pokeapi.co/api/v2/location-area"
 	if cfg.Next != "" {
@@ -66,18 +106,34 @@ func commandMap(cfg *Config) error {
 type Config struct {
 	Next     string
 	Previous string
+	cache    map[string]locationAreaResponse
 }
 
 type cliCommand struct {
 	name        string
 	description string
-	callback    func(*Config) error
+	callback    func(*Config, string) error
+}
+
+type pokemonSpeciesInfo struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
+}
+
+type pokemonEncounter struct {
+	Pokemon pokemonSpeciesInfo `json:"pokemon"`
+}
+
+type locationAreaResponse struct {
+	PokemonEncounters []pokemonEncounter `json:"pokemon_encounters"`
 }
 
 func main() {
 	r := os.Stdin
 	s := bufio.NewScanner(r)
-	cfg := Config{}
+	cfg := Config{
+		cache: make(map[string]locationAreaResponse),
+	}
 	supportedCommands := map[string]cliCommand{
 		"exit": {
 			name:        "exit",
@@ -91,6 +147,10 @@ func main() {
 			name:        "map",
 			description: "Displays pokemon locations",
 			callback:    commandMap,
+		}, "explore": {
+			name:        "explore",
+			description: "Lists all pokemon in that location area",
+			callback:    commandExplore,
 		},
 	}
 
@@ -113,7 +173,14 @@ func main() {
 			fmt.Println("Unknown command")
 			continue
 		}
-		command.callback(&cfg)
+		location := ""
+		if len(words) > 1 {
+			location = words[1]
+		}
+		if err := command.callback(&cfg, location); err != nil {
+			fmt.Println(err)
+			continue
+		}
 
 	}
 }
