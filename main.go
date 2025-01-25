@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"os"
 	"strings"
@@ -103,10 +104,45 @@ func commandMap(cfg *Config, s string) error {
 	return nil
 }
 
+func commandCatch(cfg *Config, pokemon string) error {
+	if pokemon == "" {
+		return fmt.Errorf("No pokemon name was entered")
+	}
+	url := "https://pokeapi.co/api/v2/pokemon/" + strings.ToLower(pokemon)
+	res, err := http.Get(url)
+	if err != nil {
+		return err
+	}
+	if res.StatusCode != 200 {
+		return fmt.Errorf("Pokemon %v not found", pokemon)
+	}
+	defer res.Body.Close()
+	// Decode Pokemon API Response JSON to a Go Struct
+	p := Pokemon{}
+	decoder := json.NewDecoder(res.Body)
+
+	if err := decoder.Decode(&p); err != nil {
+		return err
+	}
+	// For each pokeball throw, a random number between 0-999 is chosen
+	// If the Number is Higher than the pokemon's base experience + 400, catch is successful
+	fmt.Printf("Throwing a Pokeball at %v...\n", pokemon)
+	randomNum := rand.Intn(1000)
+	threshold := 400 + p.BaseExperience
+	if randomNum >= threshold {
+		cfg.Pokedex[p.Name] = p
+		fmt.Printf("%v was caught!\n", p.Name)
+	} else {
+		fmt.Printf("%v escaped!\n", p.Name)
+	}
+	return nil
+}
+
 type Config struct {
 	Next     string
 	Previous string
 	cache    map[string]locationAreaResponse
+	Pokedex  map[string]Pokemon
 }
 
 type cliCommand struct {
@@ -132,7 +168,8 @@ func main() {
 	r := os.Stdin
 	s := bufio.NewScanner(r)
 	cfg := Config{
-		cache: make(map[string]locationAreaResponse),
+		cache:   make(map[string]locationAreaResponse),
+		Pokedex: make(map[string]Pokemon),
 	}
 	supportedCommands := map[string]cliCommand{
 		"exit": {
@@ -151,6 +188,10 @@ func main() {
 			name:        "explore",
 			description: "Lists all pokemon in that location area",
 			callback:    commandExplore,
+		}, "catch": {
+			name:        "catch",
+			description: "Throw a pokeball at a pokemon in order to capture it",
+			callback:    commandCatch,
 		},
 	}
 
