@@ -28,12 +28,9 @@ func commandExit(cfg *Config, s string) error {
 }
 
 func commandHelp(cfg *Config, s string) error {
-	fmt.Println("Welcome to the Pokedex!")
-	fmt.Println("Usage:")
-	fmt.Println("help: Displays a help message")
-	fmt.Println("exit: Exit the Pokedex")
-	fmt.Println("map: Display a list of location areas")
-	fmt.Println("explore: Displays all pokemon in location area")
+	for k, v := range cfg.supportedCommands {
+		fmt.Printf("%v: %v\n", k, v.description)
+	}
 	return nil
 }
 
@@ -125,24 +122,68 @@ func commandCatch(cfg *Config, pokemon string) error {
 		return err
 	}
 	// For each pokeball throw, a random number between 0-999 is chosen
-	// If the Number is Higher than the pokemon's base experience + 400, catch is successful
+	// If the Number is Higher than the pokemon's base experience + 350, catch is successful
 	fmt.Printf("Throwing a Pokeball at %v...\n", pokemon)
 	randomNum := rand.Intn(1000)
-	threshold := 400 + p.BaseExperience
+	threshold := 350 + p.BaseExperience
 	if randomNum >= threshold {
 		cfg.Pokedex[p.Name] = p
 		fmt.Printf("%v was caught!\n", p.Name)
+		fmt.Println("You may now inspect it with the inspect command.")
 	} else {
 		fmt.Printf("%v escaped!\n", p.Name)
 	}
 	return nil
 }
 
+func commandInspect(cfg *Config, pokemon string) error {
+	if _, ok := cfg.Pokedex[pokemon]; !ok {
+		fmt.Println("you have not caught that pokemon")
+	}
+	url := "https://pokeapi.co/api/v2/pokemon/" + strings.ToLower(pokemon)
+	res, err := http.Get(url)
+	if err != nil {
+		return err
+	}
+	if res.StatusCode != 200 {
+		return fmt.Errorf("Pokemon %v not found", pokemon)
+	}
+	defer res.Body.Close()
+	// Decode Pokemon API Response JSON to a Go Struct
+	p := Pokemon{}
+	decoder := json.NewDecoder(res.Body)
+
+	if err := decoder.Decode(&p); err != nil {
+		return err
+	}
+	fmt.Printf("Name: %v\n", p.Name)
+	fmt.Printf("Height: %v\n", p.Weight)
+	stats := p.Stats
+	types := p.Types
+	fmt.Println("Stats:")
+	for _, stat := range stats {
+		fmt.Printf("\t-%v: %v\n", stat.Stat.Name, stat.BaseStat)
+	}
+	fmt.Println("Types:")
+	for _, pokemonType := range types {
+		fmt.Printf("\t- %v\n", pokemonType.Type.Name)
+	}
+	return nil
+}
+
+func commandPokedex(cfg *Config, s string) error {
+	for _, v := range cfg.Pokedex {
+		fmt.Printf("\t- %v\n", v.Name)
+	}
+	return nil
+}
+
 type Config struct {
-	Next     string
-	Previous string
-	cache    map[string]locationAreaResponse
-	Pokedex  map[string]Pokemon
+	Next              string
+	Previous          string
+	cache             map[string]locationAreaResponse
+	Pokedex           map[string]Pokemon
+	supportedCommands map[string]cliCommand
 }
 
 type cliCommand struct {
@@ -170,28 +211,36 @@ func main() {
 	cfg := Config{
 		cache:   make(map[string]locationAreaResponse),
 		Pokedex: make(map[string]Pokemon),
-	}
-	supportedCommands := map[string]cliCommand{
-		"exit": {
-			name:        "exit",
-			description: "Exit the Pokedex",
-			callback:    commandExit,
-		}, "help": {
-			name:        "help",
-			description: "Displays a help message",
-			callback:    commandHelp,
-		}, "map": {
-			name:        "map",
-			description: "Displays pokemon locations",
-			callback:    commandMap,
-		}, "explore": {
-			name:        "explore",
-			description: "Lists all pokemon in that location area",
-			callback:    commandExplore,
-		}, "catch": {
-			name:        "catch",
-			description: "Throw a pokeball at a pokemon in order to capture it",
-			callback:    commandCatch,
+		supportedCommands: map[string]cliCommand{
+			"exit": {
+				name:        "exit",
+				description: "Exit the Pokedex",
+				callback:    commandExit,
+			}, "help": {
+				name:        "help",
+				description: "Displays a help message",
+				callback:    commandHelp,
+			}, "map": {
+				name:        "map",
+				description: "Displays pokemon locations",
+				callback:    commandMap,
+			}, "explore": {
+				name:        "explore",
+				description: "Lists all pokemon in that location area",
+				callback:    commandExplore,
+			}, "catch": {
+				name:        "catch",
+				description: "Throw a pokeball at a pokemon in order to capture it",
+				callback:    commandCatch,
+			}, "inspect": {
+				name:        "inspect",
+				description: "Prints the name, height, weight, stats, and type(s) of entered Pokemon",
+				callback:    commandInspect,
+			}, "pokedex": {
+				name:        "pokedex",
+				description: "Prints out all pokemon in pokedex",
+				callback:    commandPokedex,
+			},
 		},
 	}
 
@@ -209,7 +258,7 @@ func main() {
 		}
 		commandName := words[0]
 
-		command, ok := supportedCommands[commandName]
+		command, ok := cfg.supportedCommands[commandName]
 		if !ok {
 			fmt.Println("Unknown command")
 			continue
